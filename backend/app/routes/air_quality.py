@@ -1,5 +1,5 @@
 
-import httpx
+import subprocess
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -7,7 +7,7 @@ from app.services.cpcb_service import fetch_cpcb_data
 
 router = APIRouter(
     prefix="/api/air-quality",
-    tags=["Air Quality"]
+    tags=["Air Quality"],
 )
 
 
@@ -19,7 +19,7 @@ async def get_air_quality(
     try:
         result = await fetch_cpcb_data(
             city=city,
-            state=state
+            state=state,
         )
 
         return result
@@ -27,23 +27,21 @@ async def get_air_quality(
     except ValueError as error:
         raise HTTPException(
             status_code=500,
-            detail=str(error)
+            detail=str(error),
         )
 
-    except httpx.HTTPStatusError as error:
-        print("CPCB HTTP ERROR:", repr(error))
+    except subprocess.TimeoutExpired:
+        raise HTTPException(
+            status_code=504,
+            detail="CPCB API request timed out. Please try again later.",
+        )
+
+    except RuntimeError as error:
+        print("CPCB ERROR:", str(error))
 
         raise HTTPException(
             status_code=502,
-            detail=f"CPCB provider returned HTTP {error.response.status_code}"
-        )
-
-    except httpx.RequestError as error:
-        print("CPCB CONNECTION ERROR:", repr(error))
-
-        raise HTTPException(
-            status_code=502,
-            detail=f"Connection failed: {type(error).__name__}"
+            detail=str(error),
         )
 
     except Exception as error:
@@ -51,5 +49,5 @@ async def get_air_quality(
 
         raise HTTPException(
             status_code=500,
-            detail="Unexpected air quality service error"
+            detail="Unexpected air quality service error.",
         )

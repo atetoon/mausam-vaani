@@ -3,19 +3,20 @@ import { useCallback, useEffect, useState } from "react";
 import {
   Sun, Cloud, CloudSun, CloudFog, CloudRain, CloudSnow,
   CloudLightning, RefreshCw, MapPin, Droplets, Wind,
-  Thermometer, Gauge, Activity, Clock3
+  Activity, Clock3
 } from "lucide-react";
 
 import Sidebar from "./components/Sidebar";
 import { getWeather } from "./services/weather";
 
 const pollutants = [
-  { name: "PM2.5", description: "Fine particles", unit: "µg/m³" },
-  { name: "PM10", description: "Coarse particles", unit: "µg/m³" },
-  { name: "O₃", description: "Ozone", unit: "µg/m³" },
-  { name: "NO₂", description: "Nitrogen dioxide", unit: "µg/m³" },
-  { name: "SO₂", description: "Sulphur dioxide", unit: "µg/m³" },
-  { name: "CO", description: "Carbon monoxide", unit: "mg/m³" },
+  { id: "PM2.5", name: "PM2.5", description: "Fine particles", unit: "µg/m³" },
+  { id: "PM10", name: "PM10", description: "Coarse particles", unit: "µg/m³" },
+  { id: "OZONE", name: "O₃", description: "Ozone", unit: "µg/m³" },
+  { id: "NO2", name: "NO₂", description: "Nitrogen dioxide", unit: "µg/m³" },
+  { id: "SO2", name: "SO₂", description: "Sulphur dioxide", unit: "µg/m³" },
+  { id: "CO", name: "CO", description: "Carbon monoxide", unit: "mg/m³" },
+  { id: "NH3", name: "NH₃", description: "Ammonia", unit: "µg/m³" },
 ];
 
 const aqiCategories = [
@@ -43,38 +44,113 @@ function getWeatherInfo(code) {
   return { label: "Conditions unavailable", Icon: Cloud };
 }
 
+function getStateForCity(city) {
+  const states = {
+    Noida: "Uttar Pradesh",
+    Delhi: "Delhi",
+    Mumbai: "Maharashtra",
+    Bengaluru: "Karnataka",
+    Bangalore: "Karnataka",
+    Kolkata: "West Bengal",
+    Chennai: "Tamil Nadu",
+  };
+
+  return states[city] || "Uttar Pradesh";
+}
+
 function App() {
   const [city, setCity] = useState("Noida");
   const [activePage, setActivePage] = useState("dashboard");
+
   const [weather, setWeather] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [airQuality, setAirQuality] = useState(null);
 
-  const loadWeather = useCallback(async (selectedCity) => {
-    setLoading(true);
-    setError("");
+  const [weatherLoading, setWeatherLoading] = useState(false);
+  const [aqLoading, setAqLoading] = useState(false);
 
-    try {
-      const data = await getWeather(selectedCity);
-      setWeather(data);
-    } catch (err) {
-      setWeather(null);
-      setError(err.message || "Unable to fetch weather data.");
-    } finally {
-      setLoading(false);
-    }
+  const [weatherError, setWeatherError] = useState("");
+  const [aqError, setAqError] = useState("");
+
+  const loadDashboard = useCallback(async (selectedCity) => {
+    const state = getStateForCity(selectedCity);
+
+    setWeatherLoading(true);
+    setAqLoading(true);
+    setWeatherError("");
+    setAqError("");
+
+    const weatherRequest = getWeather(selectedCity)
+      .then(setWeather)
+      .catch((error) => {
+        setWeather(null);
+        setWeatherError(error.message || "Unable to fetch weather.");
+      })
+      .finally(() => setWeatherLoading(false));
+
+    const aqRequest = fetch(
+      `http://localhost:8000/api/air-quality/?city=${encodeURIComponent(selectedCity)}&state=${encodeURIComponent(state)}`
+    )
+      .then(async (response) => {
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({}));
+          throw new Error(data.detail || `Request failed (${response.status})`);
+        }
+
+        return response.json();
+      })
+      .then(setAirQuality)
+      .catch((error) => {
+        setAirQuality(null);
+        setAqError(error.message || "Unable to fetch CPCB data.");
+      })
+      .finally(() => setAqLoading(false));
+
+    await Promise.allSettled([weatherRequest, aqRequest]);
   }, []);
 
   useEffect(() => {
-    loadWeather(city);
-  }, [city, loadWeather]);
+    loadDashboard(city);
+  }, [city, loadDashboard]);
 
   const current = weather?.current;
   const daily = weather?.daily;
+
   const condition = current
     ? getWeatherInfo(current.weather_code)
     : { label: "Weather unavailable", Icon: Cloud };
+
   const WeatherIcon = condition.Icon;
+
+  const records = airQuality?.records || [];
+
+  const latestUpdate = records.length
+    ? records.reduce((latest, record) => {
+        return record.last_update > latest ? record.last_update : latest;
+      }, "")
+    : null;
+
+  function getPollutantRecords(id) {
+    return records
+      .filter((record) => record.pollutant_id === id)
+      .map((record) => ({
+        ...record,
+        numericValue:
+          record.avg_value !== "NA" && record.avg_value !== ""
+            ? Number(record.avg_value)
+            : null,
+      }))
+      .filter((record) => Number.isFinite(record.numericValue));
+  }
+
+  function getHighestReading(id) {
+    const readings = getPollutantRecords(id);
+
+    if (!readings.length) return null;
+
+    return readings.reduce((highest, reading) =>
+      reading.numericValue > highest.numericValue ? reading : highest
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#f7f9fc] text-[#14243a]">
@@ -86,7 +162,6 @@ function App() {
       />
 
       <main className="min-h-screen px-5 py-7 md:ml-[226px] md:px-7 lg:px-8">
-        {/* Header */}
         <header className="mb-6 flex flex-wrap items-center justify-between gap-4">
           <div>
             <h1 className="text-[23px] font-semibold tracking-tight text-[#10233d] sm:text-[26px]">
@@ -105,11 +180,14 @@ function App() {
           </div>
 
           <button
-            onClick={() => loadWeather(city)}
-            disabled={loading}
+            onClick={() => loadDashboard(city)}
+            disabled={weatherLoading || aqLoading}
             className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-xs text-slate-600 shadow-sm hover:bg-slate-50 disabled:opacity-50"
           >
-            <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
+            <RefreshCw
+              size={14}
+              className={weatherLoading || aqLoading ? "animate-spin" : ""}
+            />
             Refresh
           </button>
         </header>
@@ -122,24 +200,28 @@ function App() {
           </div>
         ) : (
           <>
-            {error && (
-              <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-700">
-                Weather request failed: {error}
+            {weatherError && (
+              <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-700">
+                Weather error: {weatherError}
               </div>
             )}
 
-            {/* AQI and weather overview */}
+            {aqError && (
+              <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-700">
+                CPCB error: {aqError}
+              </div>
+            )}
+
             <section className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_206px]">
-              {/* AQI card */}
               <article className="rounded-2xl border border-slate-200 bg-gradient-to-br from-[#fff5ed] via-white to-white p-6 shadow-sm">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <p className="text-[13px] font-medium text-slate-700">
-                    Live AQI in {weather?.location?.name || city}
+                    Live AQI in {city}
                   </p>
 
                   <span className="flex items-center gap-2 text-[11px] text-slate-500">
-                    <span className="size-2 rounded-full bg-emerald-500" />
-                    CPCB readings not connected
+                    <span className={`size-2 rounded-full ${records.length ? "bg-emerald-500" : "bg-slate-300"}`} />
+                    {aqLoading ? "Fetching CPCB data..." : records.length ? "CPCB data connected" : "Data unavailable"}
                   </span>
                 </div>
 
@@ -154,32 +236,39 @@ function App() {
 
                 <div className="mt-4 inline-flex rounded-full bg-slate-100 px-3 py-1.5 text-[11px] text-slate-500">
                   <Activity size={13} className="mr-2" />
-                  Waiting for verified AQI data
+                  Official city AQI not calculated
                 </div>
 
                 <p className="mt-3 max-w-xl text-xs leading-5 text-slate-500">
-                  Live air quality readings and health advisories will appear
-                  here when the CPCB monitoring data integration is complete.
+                  CPCB pollutant measurements are available below by monitoring
+                  station. A city AQI value requires the prescribed CPCB
+                  calculation and valid pollutant sub-indices.
                 </p>
 
                 <div className="mt-5 grid grid-cols-2 gap-3">
-                  {["PM2.5", "PM10"].map((name) => (
-                    <div
-                      key={name}
-                      className="rounded-xl border border-slate-200 bg-white/80 px-4 py-3"
-                    >
-                      <p className="text-[11px] text-slate-500">{name}</p>
-                      <p className="mt-1 text-xl font-semibold text-slate-300">
-                        —
-                        <span className="ml-1 text-[10px] font-normal text-slate-400">
-                          µg/m³
-                        </span>
-                      </p>
-                    </div>
-                  ))}
+                  {["PM2.5", "PM10"].map((id) => {
+                    const reading = getHighestReading(id);
+
+                    return (
+                      <div
+                        key={id}
+                        className="rounded-xl border border-slate-200 bg-white/80 px-4 py-3"
+                      >
+                        <p className="text-[11px] text-slate-500">{id}</p>
+                        <p className="mt-1 text-xl font-semibold">
+                          {reading ? reading.numericValue : "—"}
+                          <span className="ml-1 text-[10px] font-normal text-slate-400">
+                            µg/m³
+                          </span>
+                        </p>
+                        <p className="mt-1 truncate text-[9px] text-slate-400">
+                          {reading ? `Highest: ${reading.station}` : "No valid reading"}
+                        </p>
+                      </div>
+                    );
+                  })}
                 </div>
 
-                {/* India AQI scale */}
                 <div className="mt-5">
                   <div className="flex h-2 overflow-hidden rounded-full">
                     {aqiCategories.map((category) => (
@@ -193,7 +282,7 @@ function App() {
 
                   <div className="mt-2 flex justify-between gap-1">
                     {aqiCategories.map((category) => (
-                      <div key={category.label} className="text-left">
+                      <div key={category.label}>
                         <p className="text-[9px] text-slate-500">
                           {category.value}
                         </p>
@@ -206,13 +295,12 @@ function App() {
                 </div>
               </article>
 
-              {/* Weather card */}
               <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                 <h2 className="text-[15px] font-semibold">
                   Weather in {weather?.location?.name || city}
                 </h2>
 
-                {loading && !current ? (
+                {weatherLoading && !current ? (
                   <div className="flex min-h-48 items-center justify-center text-xs text-slate-400">
                     Loading weather...
                   </div>
@@ -268,53 +356,81 @@ function App() {
               </article>
             </section>
 
-            {/* Pollutants */}
             <section className="mt-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
               <div className="mb-5">
                 <h2 className="text-[16px] font-semibold">
-                  Air pollutants in {weather?.location?.name || city}
+                  Air pollutants in {city}
                 </h2>
                 <p className="mt-1 text-xs text-slate-500">
-                  Current concentrations. Colour will indicate each pollutant's
-                  AQI level when readings are available.
+                  Highest valid reported average from available monitoring
+                  stations. Select readings are station-specific, not city averages.
                 </p>
               </div>
 
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                {pollutants.map((pollutant) => (
-                  <article
-                    key={pollutant.name}
-                    className="overflow-hidden rounded-xl border border-slate-200"
-                  >
-                    <div className="h-1 bg-slate-200" />
-                    <div className="p-4">
-                      <p className="text-xs font-semibold">
-                        {pollutant.name}
-                      </p>
-                      <p className="mt-0.5 text-[10px] text-slate-500">
-                        {pollutant.description}
-                      </p>
-                      <p className="mt-3 text-2xl font-semibold text-slate-300">
-                        —
-                        <span className="ml-1 text-[10px] font-normal text-slate-400">
-                          {pollutant.unit}
-                        </span>
-                      </p>
-                      <p className="mt-1 text-[10px] text-slate-400">
-                        Reading unavailable
-                      </p>
-                    </div>
-                  </article>
-                ))}
+                {pollutants.map((pollutant) => {
+                  const readings = getPollutantRecords(pollutant.id);
+                  const highest = getHighestReading(pollutant.id);
+
+                  return (
+                    <article
+                      key={pollutant.id}
+                      className="overflow-hidden rounded-xl border border-slate-200"
+                    >
+                      <div className="h-1 bg-slate-200" />
+                      <div className="p-4">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-xs font-semibold">
+                            {pollutant.name}
+                          </p>
+                          <span className="text-[9px] text-slate-400">
+                            {readings.length} stations
+                          </span>
+                        </div>
+
+                        <p className="mt-0.5 text-[10px] text-slate-500">
+                          {pollutant.description}
+                        </p>
+
+                        <p className={`mt-3 text-2xl font-semibold ${highest ? "text-slate-800" : "text-slate-300"}`}>
+                          {highest ? highest.numericValue : "—"}
+                          <span className="ml-1 text-[10px] font-normal text-slate-400">
+                            {pollutant.unit}
+                          </span>
+                        </p>
+
+                        <p className="mt-1 text-[10px] text-slate-400">
+                          {highest
+                            ? `Highest: ${highest.station}`
+                            : "No valid reading available"}
+                        </p>
+                      </div>
+                    </article>
+                  );
+                })}
               </div>
+
+              {latestUpdate && (
+                <p className="mt-5 border-t border-slate-100 pt-3 text-[10px] text-slate-400">
+                  <Clock3 size={12} className="mr-1 inline" />
+                  Latest reported update: {latestUpdate}
+                  {" · "}
+                  Source: CPCB / data.gov.in
+                </p>
+              )}
+
+              {aqLoading && (
+                <p className="mt-3 text-[11px] text-slate-400">
+                  Updating monitoring station readings...
+                </p>
+              )}
             </section>
 
-            {/* AQI history */}
             <section className="mt-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h2 className="text-[16px] font-semibold">
-                    AQI history in {weather?.location?.name || city}
+                    AQI history in {city}
                   </h2>
                   <p className="mt-1 text-xs text-slate-500">
                     Historical air quality readings
@@ -344,8 +460,8 @@ function App() {
                   Historical AQI data not connected
                 </p>
                 <p className="mt-1 max-w-sm text-[10px] text-slate-400">
-                  This chart will display historical CPCB readings after the
-                  data source and storage layer are integrated.
+                  Historical readings require a storage layer to retain
+                  previous CPCB API responses.
                 </p>
               </div>
             </section>

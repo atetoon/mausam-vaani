@@ -1,11 +1,11 @@
 
+import json
 import os
+import subprocess
 from pathlib import Path
 
-import httpx
 from dotenv import load_dotenv
 
-# Load backend/.env reliably
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 load_dotenv(BACKEND_DIR / ".env")
 
@@ -21,30 +21,40 @@ async def fetch_cpcb_data(city: str, state: str):
     if not api_key:
         raise ValueError("DATA_GOV_IN_API_KEY is missing from backend/.env")
 
-    params = {
-        "api-key": api_key,
-        "format": "json",
-        "offset": 0,
-        "limit": 100,
-        "filters[state]": state.strip(),
-        "filters[city]": city.strip(),
-    }
+    command = [
+        "curl.exe",
+        "-sS",
+        "--max-time", "20",
+        "-G",
+        CPCB_API_URL,
+        "--data-urlencode", f"api-key={api_key}",
+        "--data-urlencode", "format=json",
+        "--data-urlencode", "limit=100",
+        "--data-urlencode", f"filters[state]={state.strip()}",
+        "--data-urlencode", f"filters[city]={city.strip()}",
+        "-w", "\n%{http_code}",
+    ]
 
-    timeout = httpx.Timeout(
-        connect=15.0,
-        read=15.0,
-        write=15.0,
-        pool=15.0,
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        timeout=25,
+        check=False,
     )
 
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        response = await client.get(CPCB_API_URL, params=params)
+    if result.returncode != 0:
+        raise RuntimeError(f"CPCB curl failed: {result.stderr.strip()}")
 
-        print("CPCB STATUS:", response.status_code)
+    body, separator, status = result.stdout.rpartition("\n")
 
-        response.raise_for_status()
-        data = response.json()
+    if not separator:
+        raise RuntimeError("CPCB returned an invalid response")
 
+    if status != "200":
+        raise RuntimeError(f"CPCB provider returned HTTP {status}")
+
+    data = json.loads(body)
     records = data.get("records", [])
 
     return {
