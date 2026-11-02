@@ -1,5 +1,6 @@
 
 import { useState } from "react";
+import { NavLink, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
   Map,
@@ -15,13 +16,14 @@ import {
 
 const cities = ["Delhi", "Mumbai", "Bengaluru", "Kolkata", "Chennai"];
 
-function Sidebar({ activePage, setActivePage, selectedCity, setSelectedCity }) {
+function Sidebar({ selectedCity, setSelectedCity }) {
   const [search, setSearch] = useState("");
+  const navigate = useNavigate();
 
   const navigation = [
-    { label: "Dashboard", icon: LayoutDashboard, page: "dashboard" },
-    { label: "India Overview", icon: Map, page: "india" },
-    { label: "Most Polluted Cities", icon: TrendingUp, page: "polluted" },
+    { label: "Dashboard", icon: LayoutDashboard, path: "/" },
+    { label: "India Overview", icon: Map, path: "/india" },
+    { label: "Most Polluted Cities", icon: TrendingUp, path: "/most-polluted" },
   ];
 
   const resources = [
@@ -41,12 +43,16 @@ function Sidebar({ activePage, setActivePage, selectedCity, setSelectedCity }) {
     event.preventDefault();
 
     const city = search.trim();
-
     if (!city) return;
 
     setSelectedCity(city);
-    setActivePage("dashboard");
+    navigate("/");
     setSearch("");
+  }
+
+  function handleCityClick(city) {
+    setSelectedCity(city);
+    navigate("/");
   }
 
   return (
@@ -65,7 +71,6 @@ function Sidebar({ activePage, setActivePage, selectedCity, setSelectedCity }) {
         </div>
       </div>
 
-      {/* Functional city search */}
       <form
         onSubmit={handleSearch}
         className="mb-8 flex items-center gap-2.5 rounded-lg border border-slate-200 px-3 py-3 focus-within:border-blue-400"
@@ -84,15 +89,18 @@ function Sidebar({ activePage, setActivePage, selectedCity, setSelectedCity }) {
           MENU
         </p>
 
-        {navigation.map(({ label, icon: Icon, page }) => (
-          <button
-            key={page}
-            onClick={() => setActivePage(page)}
-            className={`${linkClass(activePage === page)} mb-1`}
+        {navigation.map(({ label, icon: Icon, path }) => (
+          <NavLink
+            key={path}
+            to={path}
+            end={path === "/"}
+            className={({ isActive }) =>
+              `${linkClass(isActive)} mb-1`
+            }
           >
             <Icon size={17} />
             {label}
-          </button>
+          </NavLink>
         ))}
       </section>
 
@@ -104,10 +112,7 @@ function Sidebar({ activePage, setActivePage, selectedCity, setSelectedCity }) {
         {cities.map((city) => (
           <button
             key={city}
-            onClick={() => {
-              setSelectedCity(city);
-              setActivePage("dashboard");
-            }}
+            onClick={() => handleCityClick(city)}
             className={`${linkClass(selectedCity === city)} mb-1`}
           >
             <MapPin size={15} />
