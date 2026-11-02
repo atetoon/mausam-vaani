@@ -76,21 +76,35 @@ function getAqiCategory(value) {
   return { label: "Hazardous", color: "text-rose-800", bg: "bg-rose-100" };
 }
 
-function formatHour(time, timezone) {
-  return new Date(time).toLocaleTimeString("en-IN", {
-    hour: "numeric",
-    hour12: true,
-    timeZone: timezone || undefined,
-  });
+function formatHour(time) {
+  if (!time) return "";
+
+  const hour = Number(time.slice(11, 13));
+
+  return new Date(Date.UTC(2020, 0, 1, hour)).toLocaleTimeString(
+    "en-IN",
+    {
+      hour: "numeric",
+      hour12: true,
+      timeZone: "UTC",
+    }
+  );
 }
 
-function formatDay(date, timezone) {
-  return new Date(`${date}T12:00:00`).toLocaleDateString("en-IN", {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-    timeZone: timezone || undefined,
-  });
+function formatDay(date) {
+  if (!date) return "";
+
+  const [year, month, day] = date.split("-").map(Number);
+
+  return new Date(Date.UTC(year, month - 1, day)).toLocaleDateString(
+    "en-IN",
+    {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+      timeZone: "UTC",
+    }
+  );
 }
 
 function Dashboard() {
